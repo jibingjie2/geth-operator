@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- xtt_v1_geth.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
