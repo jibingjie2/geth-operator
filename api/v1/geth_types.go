@@ -11,12 +11,13 @@ import (
 type GethSpec struct {
 	Image string `json:"image"`
 	//NodeType string   `json:"nodeType"`
-	Cmd      []string          `json:"cmd,omitempty"`
-	Args     []string          `json:"args"`
-	Env      map[string]string `json:"env,omitempty"`
-	Password string            `json:"password,omitempty"`
-	Phase    string            `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
-	PVCName  string            `json:"pvcName,omitempty"`
+	Cmd  []string          `json:"cmd,omitempty"`
+	Args []string          `json:"args"`
+	Env  map[string]string `json:"env,omitempty"`
+	// +kubebuilder:default:="123456"
+	Password string `json:"password,omitempty"`
+	//Phase    string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
+	PVCName string `json:"pvcName,omitempty"`
 	//GenesisConfigMap string            `json:"genesisConfigMap"`
 }
 

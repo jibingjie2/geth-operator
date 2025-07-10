@@ -11,14 +11,19 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/utils/pointer"
+	"regexp"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"strings"
 )
 
@@ -345,4 +350,213 @@ func patchGenesisExtraData(genesisJSON string, accountAddr string) (string, erro
 		return "", fmt.Errorf("修改 genesis 后序列化失败: %w", err)
 	}
 	return string(modified), nil
+}
+
+// 确保 Geth 资源所需的 ConfigMap 存在，如果不存在则创建
+func (r *GethReconciler) ensureCM(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	logger := logf.FromContext(ctx)
+	//获取cm名称
+	cmName := getConfigMapName(geth.Name)
+	//cm对象
+	cm := &corev1.ConfigMap{}
+	//查询指定的命名空间是否存在cm
+	if err := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: geth.Namespace}, cm); err != nil {
+		//cm不存在, 创建
+		if apierrors.IsNotFound(err) {
+			logger.Info("配置 ConfigMap 不存在，准备创建", "configmap", cmName)
+			//构造新的cm对象
+			newCM := buildConfigMap(geth)
+			//设置 ownerReference，确保 ConfigMap 会随 Geth 被删除
+			if err := ctrl.SetControllerReference(geth, newCM, r.Scheme); err != nil {
+				return false, err
+			}
+			//创建 ConfigMap 资源
+			if err := r.Create(ctx, newCM); err != nil {
+				return false, err
+			}
+			logger.Info("ConfigMap 创建完成", "configmap", cmName)
+			//ConfigMap已创建
+			return true, nil
+		} else {
+			//其它错误
+			return false, err
+		}
+	}
+	//ConfigMap已存在,无需处理
+	return false, nil
+}
+
+func (r *GethReconciler) ensureInitJob(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	logger := logf.FromContext(ctx)
+	jobName := getInitJobName(geth.Name)
+	job := &batchv1.Job{}
+	if err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: geth.Namespace}, job); err != nil {
+		if apierrors.IsNotFound(err) {
+			//	Job不存在,创建
+			logger.Info("初始化 Job 不存在，准备创建", "job", jobName)
+			initJob := buildInitJob(geth)
+			// 设置 ownerReference，Job 跟随 Geth 生命周期
+			if err := ctrl.SetControllerReference(geth, initJob, r.Scheme); err != nil {
+				return false, err
+			}
+			// 创建Job
+			if err := r.Create(ctx, initJob); err != nil {
+				return false, err
+			}
+			logger.Info("初始化 Job 已创建", "job", jobName)
+			return true, nil
+		} else {
+			//	其它错误,返回err
+			return false, err
+		}
+	} else {
+		return false, err
+	}
+}
+
+func (r *GethReconciler) waitInitJobCompletion(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	jobName := getInitJobName(geth.Name)
+	job := &batchv1.Job{}
+	if err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: geth.Namespace}, job); err != nil {
+		return false, err
+	}
+
+	if job.Status.Succeeded < 1 {
+		_ = updateStatusPhase(ctx, r.Status(), r.Recorder, geth, "InitJobRunning", "Initialize Job Running")
+		return false, PodNotCompletionError("Init job not complete")
+	} else {
+		return true, nil
+	}
+}
+
+func (r *GethReconciler) patchGethStatus(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	logger := logf.FromContext(ctx)
+	jobName := getInitJobName(geth.Name)
+	isOk, err := r.waitInitJobCompletion(ctx, geth)
+	if err != nil {
+		//	job未完成,requeue
+		return false, err
+	}
+	if isOk {
+		//job完成,写入地址到gethStatus
+		podList := &corev1.PodList{}
+		if err := r.List(ctx, podList, client.InNamespace(geth.Namespace), client.MatchingLabels{
+			"job-name": jobName,
+		}); err != nil {
+			logger.Error(err, "列出 Job 对应的 Pod 失败")
+			return false, err
+		}
+
+		if len(podList.Items) == 0 {
+			logger.Info("找不到 Job 对应的 Pod，等待中…")
+			return false, err
+		}
+		pod := &podList.Items[0]
+		logs, err := getPodLogs(ctrl.GetConfigOrDie(), pod, pod.Spec.Containers[0].Name)
+		if err != nil {
+			logger.Error(err, "读取 Pod 日志失败")
+			return false, err
+		}
+		var addr string
+		for _, line := range strings.Split(logs, "\n") {
+			// 使用正则表达式匹配以 0x 开头的 40 位十六进制字符串
+			re := regexp.MustCompile(`0x[a-fA-F0-9]{40}`)
+			match := re.FindString(line)
+			if match != "" {
+				addr = match
+				break
+			}
+		}
+		if addr == "" {
+			logger.Info("未从日志中解析出地址，等待重试")
+			return false, err
+		}
+		logger.Info("从日志中解析出地址", "address", addr)
+		geth.Status.AccountAddress = addr
+		if err := r.Status().Update(ctx, geth); err != nil {
+			logger.Error(err, "更新 Geth Status 失败")
+			return false, err
+		}
+		return true, nil
+	}
+	return false, err
+}
+
+func (r *GethReconciler) patchCMAddress(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	logger := logf.FromContext(ctx)
+	cmName := getConfigMapName(geth.Name)
+	cm := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: geth.Namespace}, cm); err != nil {
+		return false, err
+	}
+	original := cm.Data["genesis.json"]
+	patched, err := patchGenesisExtraData(original, geth.Status.AccountAddress)
+	if err != nil {
+		logger.Error(err, "修改 extraData 失败")
+		return false, err
+	}
+
+	cm.Data["genesis.json"] = patched
+	if err := r.Update(ctx, cm); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *GethReconciler) ensureDeployment(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	logger := logf.FromContext(ctx)
+	depName := geth.Name
+	dep := &appsv1.Deployment{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: geth.Namespace,
+		Name:      geth.Name,
+	}, dep); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("准备创建 Geth 节点 Deployment")
+			dep := buildDeployment(geth)
+			if err := ctrl.SetControllerReference(geth, dep, r.Scheme); err != nil {
+				return false, err
+			}
+			if err := r.Create(ctx, dep); err != nil {
+				return false, err
+			}
+
+			_ = updateStatusPhase(ctx, r.Status(), r.Recorder, geth, "Running", "Ready")
+
+			logger.Info("Deployment 已创建", "deployment", depName)
+			return true, nil
+		} else {
+			return false, err
+		}
+	} else {
+		return false, err
+	}
+}
+
+func (r *GethReconciler) ensureSvc(ctx context.Context, geth *xttv1.Geth) (bool, error) {
+	logger := logf.FromContext(ctx)
+	svc := &corev1.Service{}
+	svcName := geth.Name
+	if err := r.Get(ctx, types.NamespacedName{
+		Namespace: geth.Namespace,
+		Name:      geth.Name,
+	}, svc); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("准备创建 Geth Service", "svc", svcName)
+			svc := buildService(geth)
+			if err := ctrl.SetControllerReference(geth, svc, r.Scheme); err != nil {
+				return false, err
+			}
+
+			if err := r.Create(ctx, svc); err != nil {
+				return false, err
+			}
+			logger.Info("Service 创建完成", "svc", svcName)
+			return true, nil
+		} else {
+			return false, err
+		}
+	} else {
+		return false, nil
+	}
 }
