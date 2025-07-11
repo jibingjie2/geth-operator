@@ -57,8 +57,12 @@ type GethCustomDefaulter struct {
 var _ webhook.CustomDefaulter = &GethCustomDefaulter{}
 
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the Kind Geth.
+// 为geth设置默认值
 func (d *GethCustomDefaulter) Default(_ context.Context, obj runtime.Object) error {
 	geth, ok := obj.(*xttv1.Geth)
+	if geth.Spec.Password == "" {
+		_ = geth.Spec.Password == "123456"
+	}
 
 	if !ok {
 		return fmt.Errorf("expected an Geth object but got %T", obj)
@@ -101,14 +105,16 @@ func (v *GethCustomValidator) ValidateCreate(_ context.Context, obj runtime.Obje
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type Geth.
 func (v *GethCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	geth, ok := newObj.(*xttv1.Geth)
-	if !ok {
-		return nil, fmt.Errorf("expected a Geth object for the newObj but got %T", newObj)
+	oldGeth, ok1 := oldObj.(*xttv1.Geth)
+	newGeth, ok2 := newObj.(*xttv1.Geth)
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("expected a Geth object for the newObj or oldObj but got \r\n oldObj: %T \r\n newObj:", oldObj, newObj)
 	}
-	gethlog.Info("Validation for Geth upon update", "name", geth.GetName())
+	gethlog.Info("Validation for Geth upon update", "name", newGeth.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
-
+	if oldGeth.Spec.Password != newGeth.Spec.Password {
+		return nil, fmt.Errorf("密码不允许修改")
+	}
 	return nil, nil
 }
 
