@@ -1,0 +1,79 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: geths.xtt.xyz
+spec:
+  group: xtt.xyz
+  names:
+    kind: Geth
+    listKind: GethList
+    plural: geths
+    singular: geth
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: Geth 是 Geth 的 Schema
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: GethSpec 定义用户在 CR 中指定的配置
+            properties:
+              args:
+                items:
+                  type: string
+                type: array
+              cmd:
+                description: NodeType string   `json:"nodeType"`
+                items:
+                  type: string
+                type: array
+              env:
+                additionalProperties:
+                  type: string
+                type: object
+              image:
+                type: string
+              password:
+                default: "123456"
+                type: string
+              pvcName:
+                description: Phase    string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
+                type: string
+            required:
+            - args
+            - image
+            type: object
+          status:
+            description: GethStatus 定义 Geth 的当前运行状态
+            properties:
+              accountAddress:
+                type: string
+              phase:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
