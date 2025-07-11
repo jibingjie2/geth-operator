@@ -108,7 +108,7 @@ func (v *GethCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj r
 	oldGeth, ok1 := oldObj.(*xttv1.Geth)
 	newGeth, ok2 := newObj.(*xttv1.Geth)
 	if !ok1 || !ok2 {
-		return nil, fmt.Errorf("expected a Geth object for the newObj or oldObj but got \r\n oldObj: %T \r\n newObj:", oldObj, newObj)
+		return nil, fmt.Errorf("expected a Geth object for the newObj or oldObj but got \r\n oldObj: %T \r\n newObj:%T", oldObj, newObj)
 	}
 	gethlog.Info("Validation for Geth upon update", "name", newGeth.GetName())
 
