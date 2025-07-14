@@ -423,7 +423,8 @@ func (r *GethReconciler) waitInitJobCompletion(ctx context.Context, geth *xttv1.
 
 	if job.Status.Succeeded < 1 {
 		_ = updateStatusPhase(ctx, r.Status(), r.Recorder, geth, "InitJobRunning", "Initialize Job Running")
-		return false, PodNotCompletionError("Init job not complete")
+		//return false, PodNotCompletionError("Init job not complete")
+		return false, nil
 	} else {
 		return true, nil
 	}
@@ -433,7 +434,7 @@ func (r *GethReconciler) patchGethStatus(ctx context.Context, geth *xttv1.Geth) 
 	logger := logf.FromContext(ctx)
 	jobName := getInitJobName(geth.Name)
 	isOk, err := r.waitInitJobCompletion(ctx, geth)
-	if err != nil {
+	if err != nil && !isOk {
 		//	job未完成,requeue
 		return false, err
 	}

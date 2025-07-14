@@ -70,8 +70,6 @@ func (d *GethCustomDefaulter) Default(_ context.Context, obj runtime.Object) err
 	}
 	gethlog.Info("Defaulting for Geth", "name", geth.GetName())
 
-	// TODO(user): fill in your defaulting logic.
-
 	return nil
 }
 
