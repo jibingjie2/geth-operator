@@ -63,7 +63,7 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-        image: controller:latest
+        image: tt-tcr.tencentcloudcr.com/public/geth-operator:latest
         name: manager
         ports: []
         securityContext:
