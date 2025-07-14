@@ -52,6 +52,7 @@ func SetupGethWebhookWithManager(mgr ctrl.Manager) error {
 // as it is used only for temporary operations and does not need to be deeply copied.
 type GethCustomDefaulter struct {
 	// TODO(user): Add more fields as needed for defaulting
+
 }
 
 var _ webhook.CustomDefaulter = &GethCustomDefaulter{}
@@ -85,6 +86,7 @@ func (d *GethCustomDefaulter) Default(_ context.Context, obj runtime.Object) err
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as this struct is used only for temporary operations and does not need to be deeply copied.
 type GethCustomValidator struct {
+
 	// TODO(user): Add more fields as needed for validation
 }
 
